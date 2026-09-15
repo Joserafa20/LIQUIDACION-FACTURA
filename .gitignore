@@ -1,6 +1,8 @@
 pdfs/
+pdfs_entrada/
 index.json
 server.log
 __pycache__/
 *.pyc
-*.pyo
+dist/images/
+dist/index.json

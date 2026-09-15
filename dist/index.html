@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consulta Impuesto Predial — Sabanalarga</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #f0f2f5;
+  min-height: 100vh;
+}
+
+header {
+  background: linear-gradient(135deg, #1a3c6e 0%, #2a5298 100%);
+  color: #fff;
+  padding: 0 32px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.25);
+}
+.seal {
+  width: 54px; height: 54px;
+  border-radius: 50%;
+  background: #fff;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.35);
+}
+.seal img { width: 100%; height: 100%; object-fit: cover; }
+header h1 { font-size: 1.1rem; font-weight: 700; line-height: 1.3; }
+header p  { font-size: .78rem; opacity: .75; }
+
+.hero {
+  background: linear-gradient(180deg, #1a3c6e 0%, #2a5298 60%, #f0f2f5 100%);
+  padding: 48px 16px 80px;
+  text-align: center;
+  color: #fff;
+}
+.hero h2 { font-size: 1.8rem; font-weight: 700; margin-bottom: 8px; }
+.hero p  { font-size: 1rem; opacity: .85; }
+
+.search-wrap {
+  max-width: 620px;
+  margin: -44px auto 0;
+  padding: 0 16px;
+  position: relative;
+  z-index: 10;
+}
+.search-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.15);
+}
+.search-card label {
+  display: block;
+  font-size: .82rem;
+  font-weight: 600;
+  color: #1a3c6e;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: 10px;
+}
+.input-row { display: flex; gap: 10px; }
+.input-row input {
+  flex: 1;
+  padding: 14px 18px;
+  border: 2px solid #dde3ed;
+  border-radius: 10px;
+  font-size: 1.1rem;
+  letter-spacing: .08em;
+  outline: none;
+  color: #1a1a2e;
+  transition: border-color .2s, box-shadow .2s;
+}
+.input-row input:focus {
+  border-color: #1a3c6e;
+  box-shadow: 0 0 0 3px rgba(26,60,110,.1);
+}
+.input-row input::placeholder { color: #aab2c0; letter-spacing: 0; }
+.btn-buscar {
+  padding: 14px 28px;
+  background: #1a3c6e;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s;
+  white-space: nowrap;
+}
+.btn-buscar:hover { background: #2a5298; }
+
+#msg {
+  margin-top: 14px;
+  font-size: .88rem;
+  min-height: 22px;
+}
+#msg.error { color: #c0392b; }
+#msg.ok    { color: #1e8449; }
+#msg.info  { color: #777; }
+
+#result-section {
+  max-width: 860px;
+  margin: 36px auto 60px;
+  padding: 0 16px;
+}
+.result-card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.1);
+  overflow: hidden;
+}
+.result-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px 24px;
+  background: #f7f9fc;
+  border-bottom: 1px solid #e3e8f0;
+}
+.result-info { font-size: .92rem; color: #444; }
+.result-info strong { color: #1a3c6e; font-size: 1rem; }
+.btn-print {
+  padding: 10px 22px;
+  background: #1e8449;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  font-size: .92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s;
+}
+.btn-print:hover { background: #196f3d; }
+
+.factura-wrap {
+  padding: 24px;
+  background: #e8ecf0;
+  display: flex;
+  justify-content: center;
+}
+#factura-img {
+  max-width: 100%;
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.18);
+}
+
+footer {
+  text-align: center;
+  padding: 20px;
+  font-size: .78rem;
+  color: #999;
+}
+
+@media print {
+  body > * { display: none !important; }
+  #print-frame { display: block !important; position: fixed; inset: 0; width: 100%; height: 100%; border: none; }
+}
+#print-frame { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="seal"><img src="escudo.jpeg" alt="Escudo"></div>
+  <div>
+    <h1>Alcaldía de Sabanalarga — Atlántico</h1>
+    <p>Secretaría de Hacienda · Impuesto Predial Unificado</p>
+  </div>
+</header>
+
+<div class="hero">
+  <h2>Consulta tu Factura</h2>
+  <p>Ingresa tu cédula catastral y obtén tu recibo de pago al instante</p>
+</div>
+
+<div class="search-wrap">
+  <div class="search-card">
+    <label for="ref-input">Cédula Catastral del Predio</label>
+    <div class="input-row">
+      <input id="ref-input"
+             type="text"
+             placeholder="Ej: 010000580050000"
+             maxlength="30"
+             autocomplete="off"
+             spellcheck="false"
+             inputmode="numeric">
+      <button class="btn-buscar" onclick="buscar()">🔍 Buscar</button>
+    </div>
+    <div id="msg" class="info">Se ignorarán espacios y guiones al buscar.</div>
+  </div>
+</div>
+
+<div id="result-section" style="display:none">
+  <div class="result-card">
+    <div class="result-toolbar">
+      <div class="result-info">
+        Cédula catastral: <strong id="lbl-ref"></strong>
+      </div>
+      <button class="btn-print" onclick="imprimir()">🖨️ Imprimir factura</button>
+    </div>
+    <div class="factura-wrap">
+      <img id="factura-img" src="" alt="Factura predial">
+    </div>
+  </div>
+</div>
+
+<footer>Alcaldía de Sabanalarga, Atlántico &nbsp;·&nbsp; NIT 800.094.844-4</footer>
+
+<iframe id="print-frame"></iframe>
+
+<script>
+let INDEX = {};
+
+// Carga el índice una sola vez al abrir la página
+fetch('index.json')
+  .then(r => r.json())
+  .then(data => { INDEX = data; })
+  .catch(() => setMsg('⚠️ No se pudo cargar el índice de facturas.', 'error'));
+
+document.getElementById('ref-input')
+  .addEventListener('keydown', e => { if (e.key === 'Enter') buscar(); });
+
+function normalize(s) {
+  return s.replace(/[\s\-]/g, '');
+}
+
+function setMsg(text, cls) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = cls;
+}
+
+function buscar() {
+  const raw = document.getElementById('ref-input').value.trim();
+  const ref  = normalize(raw);
+  const section = document.getElementById('result-section');
+
+  if (!ref) {
+    setMsg('⚠️ Ingresa tu cédula catastral antes de buscar.', 'error');
+    return;
+  }
+
+  // Búsqueda exacta
+  let imgPath = INDEX[ref];
+
+  // Tolerancia: ceros al inicio
+  if (!imgPath) {
+    const stripped = ref.replace(/^0+/, '');
+    if (stripped) {
+      const key = Object.keys(INDEX).find(k => k.replace(/^0+/, '') === stripped);
+      if (key) imgPath = INDEX[key];
+    }
+  }
+
+  if (imgPath) {
+    document.getElementById('lbl-ref').textContent = ref;
+    document.getElementById('factura-img').src = imgPath + '?v=' + Date.now();
+    section.style.display = 'block';
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setMsg('✅ Factura encontrada.', 'ok');
+  } else {
+    setMsg('❌ No se encontró ninguna factura con esa cédula catastral.', 'error');
+    section.style.display = 'none';
+  }
+}
+
+function imprimir() {
+  const src   = document.getElementById('factura-img').src;
+  const frame = document.getElementById('print-frame');
+  frame.srcdoc = `<!DOCTYPE html><html><head><style>
+    body,html{margin:0;padding:0;background:#fff;}
+    img{width:100%;height:auto;display:block;}
+    @media print{@page{margin:0;size:auto;}}
+  </style></head><body>
+    <img src="${src}" onload="window.print()">
+  </body></html>`;
+  frame.style.display = 'block';
+  frame.contentWindow?.addEventListener('afterprint',
+    () => { frame.style.display = 'none'; }, { once: true });
+}
+</script>
+</body>
+</html>
