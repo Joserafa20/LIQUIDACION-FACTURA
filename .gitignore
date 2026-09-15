@@ -1,0 +1,6 @@
+pdfs/
+index.json
+server.log
+__pycache__/
+*.pyc
+*.pyo

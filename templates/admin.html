@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel Administrativo — Facturas Prediales</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #f4f6f9;
+  min-height: 100vh;
+  color: #222;
+}
+
+/* ── Header ── */
+header {
+  background: #1a2744;
+  color: #fff;
+  padding: 0 32px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+header h1 { font-size: 1rem; font-weight: 700; }
+header p  { font-size: .78rem; opacity: .65; }
+.badge-admin {
+  background: #e74c3c;
+  color: #fff;
+  font-size: .7rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: .05em;
+}
+
+/* ── Layout ── */
+.main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 16px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* ── Cards ── */
+.card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.08);
+  overflow: hidden;
+}
+.card-header {
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid #eaecf0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.card-header h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1a2744;
+}
+.card-header .icon { font-size: 1.2rem; }
+.card-body { padding: 24px; }
+
+/* ── Stats row ── */
+.stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.stat {
+  flex: 1;
+  min-width: 140px;
+  background: #f7f9fc;
+  border: 1px solid #e3e8f0;
+  border-radius: 10px;
+  padding: 18px 20px;
+  text-align: center;
+}
+.stat .num {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #1a3c6e;
+  line-height: 1;
+}
+.stat .lbl {
+  font-size: .78rem;
+  color: #777;
+  margin-top: 4px;
+}
+
+/* ── Upload zone ── */
+#drop-zone {
+  border: 2.5px dashed #aab4cc;
+  border-radius: 12px;
+  padding: 40px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+  position: relative;
+}
+#drop-zone.drag-over {
+  border-color: #1a3c6e;
+  background: #eef2fa;
+}
+#drop-zone .dz-icon { font-size: 2.8rem; margin-bottom: 10px; }
+#drop-zone p   { font-size: .95rem; color: #555; }
+#drop-zone em  { font-size: .82rem; color: #999; font-style: normal; margin-top: 6px; display: block; }
+#file-input { display: none; }
+
+.file-list {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.file-chip {
+  background: #eef2fa;
+  border: 1px solid #c3cde6;
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: .83rem;
+  color: #1a3c6e;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.file-chip button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #999;
+  font-size: .9rem;
+  line-height: 1;
+  padding: 0;
+}
+.file-chip button:hover { color: #c0392b; }
+
+.btn-upload {
+  margin-top: 20px;
+  width: 100%;
+  padding: 14px;
+  background: #1a3c6e;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .2s;
+}
+.btn-upload:hover    { background: #2a5298; }
+.btn-upload:disabled { background: #aab; cursor: default; }
+
+/* ── Flash messages ── */
+.flash-list { display: flex; flex-direction: column; gap: 8px; }
+.flash {
+  padding: 12px 18px;
+  border-radius: 9px;
+  font-size: .9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.flash.ok      { background: #eafaf1; color: #1e8449; border: 1px solid #a9dfbf; }
+.flash.error   { background: #fdf2f2; color: #c0392b; border: 1px solid #f1a9a0; }
+.flash.warning { background: #fef9e7; color: #b7770d; border: 1px solid #f9e79f; }
+
+/* ── Files table ── */
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th {
+  text-align: left;
+  padding: 10px 14px;
+  background: #f7f9fc;
+  color: #1a2744;
+  font-weight: 700;
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  border-bottom: 2px solid #e3e8f0;
+}
+td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #eaecf0;
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f7f9fc; }
+
+.badge-count {
+  background: #eef2fa;
+  color: #1a3c6e;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: .82rem;
+}
+.badge-status {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: .8rem;
+  font-weight: 600;
+}
+.badge-status.done       { background: #eafaf1; color: #1e8449; }
+.badge-status.processing { background: #fef9e7; color: #b7770d; }
+.badge-status.error      { background: #fdf2f2; color: #c0392b; }
+.badge-status.indexed    { background: #eef2fa; color: #1a3c6e; }
+
+.btn-del {
+  padding: 6px 14px;
+  background: #fdf2f2;
+  color: #c0392b;
+  border: 1px solid #f1a9a0;
+  border-radius: 7px;
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s;
+}
+.btn-del:hover { background: #c0392b; color: #fff; }
+
+/* ── Processing progress ── */
+#progress-section { display: none; }
+.prog-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+.prog-item:last-child { border-bottom: none; }
+.prog-bar-wrap {
+  flex: 1;
+  height: 8px;
+  background: #e8ecf0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.prog-bar {
+  height: 100%;
+  background: #1a3c6e;
+  border-radius: 4px;
+  transition: width .3s;
+}
+.prog-name { font-size: .85rem; color: #333; min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prog-pct  { font-size: .82rem; color: #1a3c6e; font-weight: 700; min-width: 40px; text-align: right; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Panel Administrativo — Secretaría de Hacienda</h1>
+    <p>Gestión de archivos PDF · Impuesto Predial Unificado</p>
+  </div>
+  <span class="badge-admin">ADMIN</span>
+</header>
+
+<div class="main">
+
+  {% with messages = get_flashed_messages(with_categories=True) %}
+  {% if messages %}
+  <div class="flash-list">
+    {% for cat, msg in messages %}
+    <div class="flash {{ cat }}">
+      {% if cat == 'ok' %}✅{% elif cat == 'error' %}❌{% else %}⚠️{% endif %}
+      {{ msg }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endwith %}
+
+  <!-- Stats -->
+  <div class="card">
+    <div class="card-header">
+      <span class="icon">📊</span>
+      <h2>Resumen del índice</h2>
+    </div>
+    <div class="card-body">
+      <div class="stats">
+        <div class="stat">
+          <div class="num" id="stat-total">{{ total }}</div>
+          <div class="lbl">Facturas indexadas</div>
+        </div>
+        <div class="stat">
+          <div class="num" id="stat-files">{{ files|length }}</div>
+          <div class="lbl">Archivos PDF cargados</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload -->
+  <div class="card">
+    <div class="card-header">
+      <span class="icon">📤</span>
+      <h2>Cargar nuevos archivos PDF</h2>
+    </div>
+    <div class="card-body">
+      <form id="upload-form" action="/admin/upload" method="post" enctype="multipart/form-data">
+        <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+          <div class="dz-icon">📂</div>
+          <p>Arrastrá los PDF acá o hacé clic para seleccionarlos</p>
+          <em>Se aceptan múltiples archivos. Cada página del PDF debe ser una factura.</em>
+          <input id="file-input" name="pdfs" type="file" accept=".pdf" multiple>
+        </div>
+        <div class="file-list" id="file-list"></div>
+        <button class="btn-upload" id="btn-upload" type="submit" disabled>
+          Subir e indexar archivos
+        </button>
+      </form>
+
+      <!-- In-progress -->
+      <div id="progress-section" style="margin-top:24px">
+        <strong style="font-size:.9rem;color:#1a2744">Procesando…</strong>
+        <div id="progress-items" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Files table -->
+  <div class="card">
+    <div class="card-header">
+      <span class="icon">🗂️</span>
+      <h2>Archivos cargados</h2>
+    </div>
+    <div class="card-body" style="padding:0">
+      {% if files %}
+      <table id="files-table">
+        <thead>
+          <tr>
+            <th>Archivo</th>
+            <th>Facturas indexadas</th>
+            <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for fname, count in files.items() %}
+          <tr id="row-{{ loop.index }}">
+            <td>{{ fname }}</td>
+            <td><span class="badge-count">{{ count }}</span></td>
+            <td><span class="badge-status indexed">✔ Indexado</span></td>
+            <td>
+              <form method="post" action="/admin/delete"
+                    onsubmit="return confirm('¿Eliminar {{ fname }} y sus {{ count }} facturas del índice?')">
+                <input type="hidden" name="file" value="{{ fname }}">
+                <button class="btn-del" type="submit">🗑 Eliminar</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div style="padding:32px;text-align:center;color:#999;font-size:.95rem">
+        No hay archivos cargados todavía.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+// ── Drag & drop ──────────────────────────────────────────────────────────
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const fileList  = document.getElementById('file-list');
+const btnUpload = document.getElementById('btn-upload');
+let selectedFiles = new DataTransfer();
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  addFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => addFiles(fileInput.files));
+
+function addFiles(files) {
+  for (const f of files) {
+    if (f.name.toLowerCase().endsWith('.pdf')) {
+      selectedFiles.items.add(f);
+    }
+  }
+  renderFileList();
+}
+
+function removeFile(name) {
+  const dt = new DataTransfer();
+  for (const f of selectedFiles.files) {
+    if (f.name !== name) dt.items.add(f);
+  }
+  selectedFiles = dt;
+  renderFileList();
+}
+
+function renderFileList() {
+  fileList.innerHTML = '';
+  for (const f of selectedFiles.files) {
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+    chip.innerHTML = `📄 ${f.name} <button onclick="removeFile('${f.name}')">✕</button>`;
+    fileList.appendChild(chip);
+  }
+  // Sync to the actual file input
+  fileInput.files = selectedFiles.files;
+  btnUpload.disabled = selectedFiles.files.length === 0;
+  if (selectedFiles.files.length > 0) {
+    btnUpload.textContent = `Subir e indexar ${selectedFiles.files.length} archivo(s)`;
+  } else {
+    btnUpload.textContent = 'Subir e indexar archivos';
+  }
+}
+
+// ── Live progress polling ─────────────────────────────────────────────────
+let pollInterval = null;
+
+function startPolling() {
+  if (pollInterval) return;
+  pollInterval = setInterval(pollStatus, 1800);
+}
+
+async function pollStatus() {
+  try {
+    const data = await fetch('/admin/status').then(r => r.json());
+    const proc = data.processing || {};
+    const active = Object.entries(proc).filter(([, v]) => v.status === 'processing');
+
+    // update stats
+    document.getElementById('stat-total').textContent = data.total;
+    document.getElementById('stat-files').textContent = Object.keys(data.files).length;
+
+    const section = document.getElementById('progress-section');
+    const items   = document.getElementById('progress-items');
+
+    if (active.length > 0) {
+      section.style.display = 'block';
+      items.innerHTML = active.map(([fname, v]) => {
+        const pct = v.total > 0 ? Math.round((v.pages_done / v.total) * 100) : 0;
+        return `<div class="prog-item">
+          <span class="prog-name">📄 ${fname}</span>
+          <div class="prog-bar-wrap"><div class="prog-bar" style="width:${pct}%"></div></div>
+          <span class="prog-pct">${pct}%</span>
+        </div>`;
+      }).join('');
+    } else {
+      // all done or error — reload once to show updated table
+      if (section.style.display === 'block') {
+        clearInterval(pollInterval);
+        pollInterval = null;
+        location.reload();
+      }
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// Start polling if there are active processes on load
+{% if processing %}
+  {% for fname, p in processing.items() %}
+    {% if p.status == 'processing' %}
+      startPolling();
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
+// Also start polling right after upload form submit
+document.getElementById('upload-form').addEventListener('submit', () => {
+  setTimeout(startPolling, 3000);
+});
+</script>
+</body>
+</html>
