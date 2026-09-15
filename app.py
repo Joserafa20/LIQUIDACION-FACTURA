@@ -1,8 +1,8 @@
 import io
 import json
+import os
 import re
 import threading
-import time
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -109,20 +109,12 @@ def _lookup(ref: str):
 # ---------------------------------------------------------------------------
 # Boot: load index and auto-index the bundled PDF if present
 # ---------------------------------------------------------------------------
-BUNDLED = Path(r"C:\Users\LENOVO\Downloads\impuestos.facturacion.adup_facturarango.pdf")
-
 _load_index()
 
-if not _index and BUNDLED.exists():
-    import shutil
-    dest = PDF_DIR / BUNDLED.name
-    if not dest.exists():
-        shutil.copy2(BUNDLED, dest)
-    print("Indexando PDF inicial…")
-    _process_pdf(dest)
-    print(f"Listo: {len(_index)} facturas indexadas.")
-elif _index:
-    print(f"Índice cargado: {len(_index)} facturas.")
+if _index:
+    print(f"Indice cargado: {len(_index)} facturas.")
+else:
+    print("Indice vacio — carga PDFs desde el panel /admin")
 
 
 # ---------------------------------------------------------------------------
@@ -239,4 +231,5 @@ def admin_delete():
 
 
 if __name__ == "__main__":
-    app.run(debug=False, port=8080, host="0.0.0.0")
+    port = int(os.environ.get("PORT", 8080))
+    app.run(debug=False, port=port, host="0.0.0.0")
