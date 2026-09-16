@@ -12,7 +12,7 @@ from pathlib import Path
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-import pdfplumber
+import fitz  # PyMuPDF — much lighter RAM footprint than pdfplumber
 
 CATASTRAL_RE  = re.compile(r"\b(\d{15})\b")
 LONG_DIGIT_RE = re.compile(r"^\d{9,}$")
@@ -46,17 +46,30 @@ def _write_status(status_file: str, data: dict):
         pass
 
 
-def _catastral_from_words(page):
-    threshold = page.height * 0.40
+def _extract_ref_from_page(page) -> str | None:
+    """Extract catastral reference using fitz text extraction."""
+    text = page.get_text("text")
+    matches = CATASTRAL_RE.findall(text)
+    if matches:
+        return matches[0]
+
+    # Fallback: look for long digit sequences in the top 40% of the page
+    rect = page.rect
+    threshold_y = rect.height * 0.40
+    clip = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + threshold_y)
+    top_text = page.get_text("words", clip=clip)
+
     candidates = []
-    for w in page.extract_words():
-        txt = w["text"]
-        if LONG_DIGIT_RE.match(txt) and w["top"] < threshold and len(txt) >= 12:
+    for word in top_text:
+        txt = word[4]  # word tuple: (x0, y0, x1, y1, "word", block, line, wnum)
+        if LONG_DIGIT_RE.match(txt) and len(txt) >= 12:
             candidates.append((len(txt), txt))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda x: -x[0])
-    return candidates[0][1]
+
+    if candidates:
+        candidates.sort(key=lambda x: -x[0])
+        return candidates[0][1]
+
+    return None
 
 
 def main():
@@ -64,8 +77,8 @@ def main():
         print("Usage: worker.py <pdf_path> <fname> <status_file>")
         sys.exit(1)
 
-    pdf_path   = Path(sys.argv[1])
-    fname      = sys.argv[2]
+    pdf_path    = Path(sys.argv[1])
+    fname       = sys.argv[2]
     status_file = sys.argv[3]
 
     _write_status(status_file, {"status": "processing", "pages_done": 0, "total": 0, "error": None})
@@ -82,29 +95,34 @@ def main():
             Body=pdf_bytes,
             ContentType="application/pdf",
         )
+        del pdf_bytes  # free memory immediately after upload
 
-        # 2. Text extraction to build index
+        # 2. Text extraction with fitz (low RAM usage)
         local = {}
-        with pdfplumber.open(pdf_path) as pdf:
-            total = len(pdf.pages)
-            _write_status(status_file, {"status": "processing", "pages_done": 0, "total": total, "error": None})
-            for i, page in enumerate(pdf.pages):
-                text = page.extract_text() or ""
-                matches = CATASTRAL_RE.findall(text)
-                ref = matches[0] if matches else _catastral_from_words(page)
-                if ref:
-                    local[ref] = {"file": fname, "page": i}
-                if i % 5 == 0:
-                    _write_status(status_file, {
-                        "status": "processing",
-                        "pages_done": i + 1,
-                        "total": total,
-                        "error": None,
-                    })
+        doc = fitz.open(str(pdf_path))
+        total = doc.page_count
+        _write_status(status_file, {"status": "processing", "pages_done": 0, "total": total, "error": None})
+
+        for i in range(total):
+            page = doc[i]
+            ref  = _extract_ref_from_page(page)
+            if ref:
+                local[ref] = {"file": fname, "page": i}
+            page = None  # release page object
+
+            if i % 5 == 0:
+                _write_status(status_file, {
+                    "status": "processing",
+                    "pages_done": i + 1,
+                    "total": total,
+                    "error": None,
+                })
+
+        doc.close()
 
         # 3. Load existing index from R2 and merge
         try:
-            obj = s3.get_object(Bucket=R2_BUCKET_NAME, Key="index.json")
+            obj      = s3.get_object(Bucket=R2_BUCKET_NAME, Key="index.json")
             existing = json.loads(obj["Body"].read().decode("utf-8"))
         except ClientError as e:
             if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
