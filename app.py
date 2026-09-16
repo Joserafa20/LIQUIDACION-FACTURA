@@ -3,6 +3,7 @@ import json
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -150,6 +151,7 @@ def _process_pdf(pdf_path: Path):
                 if ref:
                     local[ref] = {"file": fname, "page": i}
                 _processing[fname]["pages_done"] = i + 1
+                time.sleep(0)  # release GIL so HTTP threads can handle requests
 
         with _index_lock:
             _index.update(local)
