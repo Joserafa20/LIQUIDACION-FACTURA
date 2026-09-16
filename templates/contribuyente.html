@@ -279,11 +279,12 @@ async function buscar() {
 
     if (data.found) {
       document.getElementById('lbl-ref').textContent  = ref;
-      document.getElementById('lbl-page').textContent = data.page || '';
-      document.getElementById('factura-img').src = data.url + '?t=' + Date.now();
+      document.getElementById('lbl-page').textContent = '';
+      setMsg('Cargando imagen…', 'info');
+      document.getElementById('factura-img').src = `/imagen?ref=${encodeURIComponent(data.ref)}&t=${Date.now()}`;
       section.style.display = 'block';
       section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setMsg('✅ Factura encontrada.', 'ok');
+      document.getElementById('factura-img').onload = () => setMsg('✅ Factura encontrada.', 'ok');
     } else {
       setMsg('❌ No se encontró ninguna factura con esa cédula catastral.', 'error');
       section.style.display = 'none';
@@ -294,8 +295,9 @@ async function buscar() {
 }
 
 function imprimir() {
+  const ref   = normalize(input.value.trim());
   const frame = document.getElementById('print-frame');
-  const src   = document.getElementById('factura-img').src;
+  const src   = `/imagen?ref=${encodeURIComponent(ref)}`;
   frame.srcdoc = `<!DOCTYPE html><html><head><style>
     body,html{margin:0;padding:0;background:#fff;}
     img{width:100%;height:auto;display:block;}
