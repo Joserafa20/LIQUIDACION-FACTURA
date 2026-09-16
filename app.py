@@ -1,9 +1,10 @@
-import io
 import json
 import os
 import re
+import subprocess
+import sys
+import tempfile
 import threading
-import time
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -11,10 +12,9 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 import fitz
-import pdfplumber
 from flask import (
     Flask, jsonify, redirect, render_template, request,
-    send_file, url_for, flash
+    url_for, flash
 )
 
 # ---------------------------------------------------------------------------
@@ -24,9 +24,8 @@ BASE_DIR  = Path(__file__).parent
 PDF_DIR   = BASE_DIR / "pdfs"
 PDF_DIR.mkdir(exist_ok=True)
 
-CATASTRAL_RE  = re.compile(r"\b(\d{15})\b")
-LONG_DIGIT_RE = re.compile(r"^\d{9,}$")
-ALLOWED_EXT   = {".pdf"}
+CATASTRAL_RE = re.compile(r"\b(\d{15})\b")
+ALLOWED_EXT  = {".pdf"}
 
 R2_ACCOUNT_ID        = os.environ.get("R2_ACCOUNT_ID", "")
 R2_ACCESS_KEY_ID     = os.environ.get("R2_ACCESS_KEY_ID", "")
@@ -60,8 +59,7 @@ def _r2_put(key: str, data: bytes, content_type: str = "application/octet-stream
 
 
 def _r2_get_bytes(key: str) -> bytes:
-    obj = _r2().get_object(Bucket=R2_BUCKET_NAME, Key=key)
-    return obj["Body"].read()
+    return _r2().get_object(Bucket=R2_BUCKET_NAME, Key=key)["Body"].read()
 
 
 def _r2_exists(key: str) -> bool:
@@ -77,11 +75,12 @@ def _pub(key: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Index  { catastral_ref: {"file": "name.pdf", "page": 0} }
-# Stored as index.json in R2
+# Index — loaded from R2 on startup
 # ---------------------------------------------------------------------------
 _index: dict = {}
-_index_lock = threading.Lock()
+_index_lock  = threading.Lock()
+
+# Processing status: fname -> {"status", "pages_done", "total", "error", "status_file"}
 _processing: dict = {}
 
 
@@ -92,11 +91,12 @@ def _load_index():
         _index = {}
         return
     try:
-        data = _r2_get_bytes("index.json")
+        data   = _r2_get_bytes("index.json")
         _index = json.loads(data.decode("utf-8"))
         print(f"Index loaded from R2: {len(_index)} facturas.")
     except ClientError as e:
-        if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+        code = e.response["Error"]["Code"]
+        if code in ("NoSuchKey", "404"):
             _index = {}
         else:
             print(f"R2 error loading index: {e}")
@@ -106,89 +106,17 @@ def _load_index():
         _index = {}
 
 
-def _save_index():
+def _refresh_index_from_r2():
+    """Reload index from R2 after worker completes."""
+    global _index
     try:
-        _r2_put("index.json", json.dumps(_index, ensure_ascii=False).encode(), "application/json")
-    except Exception as exc:
-        print(f"Could not save index to R2: {exc}")
-
-
-def _catastral_from_words(page) -> str | None:
-    threshold = page.height * 0.40
-    candidates = []
-    for w in page.extract_words():
-        txt = w["text"]
-        if LONG_DIGIT_RE.match(txt) and w["top"] < threshold and len(txt) >= 12:
-            candidates.append((len(txt), txt))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda x: -x[0])
-    return candidates[0][1]
-
-
-# ---------------------------------------------------------------------------
-# Background processing — text-only indexing + save PDF to R2
-# Rendering is done lazily on first search request
-# ---------------------------------------------------------------------------
-def _process_pdf(pdf_path: Path):
-    fname = pdf_path.name
-    _processing[fname] = {"status": "processing", "pages_done": 0, "total": 0, "error": None}
-    try:
-        # Upload original PDF to R2 for later on-demand rendering
-        pdf_bytes = pdf_path.read_bytes()
-        _r2_put(f"pdfs/{fname}", pdf_bytes, "application/pdf")
-        print(f"PDF uploaded to R2: pdfs/{fname}")
-
-        # Text extraction only (fast — no rendering)
-        with pdfplumber.open(pdf_path) as pdf:
-            total = len(pdf.pages)
-            _processing[fname]["total"] = total
-            local = {}
-            for i, page in enumerate(pdf.pages):
-                text = page.extract_text() or ""
-                matches = CATASTRAL_RE.findall(text)
-                ref = matches[0] if matches else _catastral_from_words(page)
-                if ref:
-                    local[ref] = {"file": fname, "page": i}
-                _processing[fname]["pages_done"] = i + 1
-                time.sleep(0)  # release GIL so HTTP threads can handle requests
-
+        data = _r2_get_bytes("index.json")
+        new  = json.loads(data.decode("utf-8"))
         with _index_lock:
-            _index.update(local)
-            _save_index()
-
-        _processing[fname]["status"] = "done"
-        _processing[fname]["indexed"] = len(local)
-        print(f"Done indexing {fname}: {len(local)} facturas.")
+            _index = new
+        print(f"Index refreshed: {len(_index)} facturas.")
     except Exception as exc:
-        _processing[fname]["status"] = "error"
-        _processing[fname]["error"] = str(exc)
-        print(f"Error processing {fname}: {exc}")
-    finally:
-        try:
-            pdf_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-
-def _render_and_cache(file: str, page_num: int, ref: str) -> str | None:
-    """Render one page from R2-stored PDF, cache as JPEG in R2, return public URL."""
-    img_key = f"images/{ref}.jpg"
-    if _r2_exists(img_key):
-        return _pub(img_key)
-    try:
-        pdf_bytes = _r2_get_bytes(f"pdfs/{file}")
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        fitz_page = doc[page_num]
-        mat = fitz.Matrix(120 / 72, 120 / 72)
-        pix = fitz_page.get_pixmap(matrix=mat, alpha=False)
-        jpeg_bytes = pix.tobytes("jpeg", jpg_quality=82)
-        doc.close()
-        _r2_put(img_key, jpeg_bytes, "image/jpeg")
-        return _pub(img_key)
-    except Exception as exc:
-        print(f"Error rendering {file} page {page_num}: {exc}")
-        return None
+        print(f"Could not refresh index: {exc}")
 
 
 def _lookup(ref: str):
@@ -205,9 +133,65 @@ def _lookup(ref: str):
 
 
 # ---------------------------------------------------------------------------
+# Background worker launcher (subprocess — no GIL contention)
+# ---------------------------------------------------------------------------
+def _launch_worker(pdf_path: Path, fname: str):
+    """Spawn worker.py as a child process. Parent stays responsive."""
+    status_file = str(BASE_DIR / f".status_{fname}.json")
+    _processing[fname] = {
+        "status": "processing",
+        "pages_done": 0,
+        "total": 0,
+        "error": None,
+        "status_file": status_file,
+    }
+
+    worker_script = str(BASE_DIR / "worker.py")
+    proc = subprocess.Popen(
+        [sys.executable, worker_script, str(pdf_path), fname, status_file],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=os.environ.copy(),
+    )
+
+    def _monitor():
+        stdout, stderr = proc.communicate()
+        if proc.returncode == 0:
+            _processing[fname]["status"] = "done"
+            _refresh_index_from_r2()
+        else:
+            _processing[fname]["status"] = "error"
+            _processing[fname]["error"] = stderr.decode(errors="replace")
+        try:
+            Path(status_file).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    threading.Thread(target=_monitor, daemon=True).start()
+
+
+def _read_processing_status() -> dict:
+    """Return a copy of _processing with live progress from status files."""
+    result = {}
+    for fname, info in list(_processing.items()):
+        entry = dict(info)
+        sf = entry.pop("status_file", None)
+        if sf and entry.get("status") == "processing":
+            try:
+                with open(sf, encoding="utf-8") as f:
+                    live = json.load(f)
+                entry.update({k: v for k, v in live.items() if k != "status_file"})
+            except Exception:
+                pass
+        result[fname] = entry
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Boot
 # ---------------------------------------------------------------------------
 _load_index()
+
 
 # ---------------------------------------------------------------------------
 # Routes — Contribuyente
@@ -228,15 +212,28 @@ def buscar():
 
 @app.route("/imagen")
 def imagen():
-    """Render page on demand (cached in R2 after first request)."""
+    """Render single page on demand, cache in R2."""
     ref = request.args.get("ref", "")
     stored_ref, entry = _lookup(ref)
     if not entry:
         return "No encontrado", 404
-    url = _render_and_cache(entry["file"], entry["page"], stored_ref)
-    if not url:
-        return "Error al generar la imagen", 500
-    return redirect(url)
+
+    img_key = f"images/{stored_ref}.jpg"
+    if _r2_exists(img_key):
+        return redirect(_pub(img_key))
+
+    try:
+        pdf_bytes  = _r2_get_bytes(f"pdfs/{entry['file']}")
+        doc        = fitz.open(stream=pdf_bytes, filetype="pdf")
+        fitz_page  = doc[entry["page"]]
+        mat        = fitz.Matrix(120 / 72, 120 / 72)
+        pix        = fitz_page.get_pixmap(matrix=mat, alpha=False)
+        jpeg_bytes = pix.tobytes("jpeg", jpg_quality=82)
+        doc.close()
+        _r2_put(img_key, jpeg_bytes, "image/jpeg")
+        return redirect(_pub(img_key))
+    except Exception as exc:
+        return f"Error al generar imagen: {exc}", 500
 
 
 # ---------------------------------------------------------------------------
@@ -248,12 +245,12 @@ def admin():
         total = len(_index)
         files: dict[str, int] = {}
         for entry in _index.values():
-            fname = entry["file"]
-            files[fname] = files.get(fname, 0) + 1
+            fn = entry["file"]
+            files[fn] = files.get(fn, 0) + 1
     return render_template("admin.html",
                            total=total,
                            files=files,
-                           processing=dict(_processing))
+                           processing=_read_processing_status())
 
 
 @app.route("/admin/upload", methods=["POST"])
@@ -271,10 +268,9 @@ def admin_upload():
             flash(f"'{f.filename}' no es un PDF válido.", "warning")
             continue
         fname = secure_filename(f.filename)
-        dest = PDF_DIR / fname
+        dest  = PDF_DIR / fname
         f.save(dest)
-        t = threading.Thread(target=_process_pdf, args=(dest,), daemon=True)
-        t.start()
+        _launch_worker(dest, fname)
         launched.append(fname)
 
     if launched:
@@ -288,9 +284,13 @@ def admin_status():
         total = len(_index)
         files: dict[str, int] = {}
         for entry in _index.values():
-            fname = entry["file"]
-            files[fname] = files.get(fname, 0) + 1
-    return jsonify({"total": total, "files": files, "processing": _processing})
+            fn = entry["file"]
+            files[fn] = files.get(fn, 0) + 1
+    return jsonify({
+        "total": total,
+        "files": files,
+        "processing": _read_processing_status(),
+    })
 
 
 @app.route("/admin/delete", methods=["POST"])
@@ -301,12 +301,18 @@ def admin_delete():
         return redirect(url_for("admin"))
     removed = 0
     with _index_lock:
-        keys_to_del = [k for k, v in _index.items() if v.get("file") == fname]
-        for k in keys_to_del:
+        keys = [k for k, v in _index.items() if v.get("file") == fname]
+        for k in keys:
             del _index[k]
             removed += 1
-        _save_index()
-    flash(f"'{fname}' eliminado del índice — {removed} facturas removidas.", "ok")
+    try:
+        _r2_put("index.json",
+                json.dumps(_index, ensure_ascii=False).encode(),
+                "application/json")
+    except Exception as exc:
+        flash(f"Error actualizando índice en R2: {exc}", "error")
+        return redirect(url_for("admin"))
+    flash(f"'{fname}' eliminado — {removed} facturas removidas.", "ok")
     return redirect(url_for("admin"))
 
 
