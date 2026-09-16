@@ -279,8 +279,8 @@ async function buscar() {
 
     if (data.found) {
       document.getElementById('lbl-ref').textContent  = ref;
-      document.getElementById('lbl-page').textContent = data.page;
-      document.getElementById('factura-img').src = `/imagen?ref=${encodeURIComponent(ref)}&t=${Date.now()}`;
+      document.getElementById('lbl-page').textContent = data.page || '';
+      document.getElementById('factura-img').src = data.url + '?t=' + Date.now();
       section.style.display = 'block';
       section.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setMsg('✅ Factura encontrada.', 'ok');
@@ -294,9 +294,8 @@ async function buscar() {
 }
 
 function imprimir() {
-  const ref   = normalize(input.value.trim());
   const frame = document.getElementById('print-frame');
-  const src   = `/imagen?ref=${encodeURIComponent(ref)}&t=${Date.now()}`;
+  const src   = document.getElementById('factura-img').src;
   frame.srcdoc = `<!DOCTYPE html><html><head><style>
     body,html{margin:0;padding:0;background:#fff;}
     img{width:100%;height:auto;display:block;}
